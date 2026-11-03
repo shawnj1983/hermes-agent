@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   acceptsTriggerCompletion,
+  composerIsReconnecting,
   isPendingDraftPersistCurrent,
   type PendingDraftPersist,
   pickPlaceholder,
@@ -85,6 +86,21 @@ describe('acceptsTriggerCompletion', () => {
 
   it('keeps Tab as the explicit accept even over free text', () => {
     expect(press('Tab', { freeTextArgStage: true, query: 'goal stat' })).toBe(true)
+  })
+})
+
+describe('composerIsReconnecting (#39956 sleep/wake composer freeze)', () => {
+  it('keeps the first connecting/idle boot as a cold start', () => {
+    expect(composerIsReconnecting('idle', false)).toBe(false)
+    expect(composerIsReconnecting('connecting', false)).toBe(false)
+    expect(composerIsReconnecting('open', false)).toBe(false)
+  })
+
+  it('treats a post-open connecting stall as reconnect, not a disabled cold start', () => {
+    expect(composerIsReconnecting('connecting', true)).toBe(true)
+    expect(composerIsReconnecting('closed', true)).toBe(true)
+    expect(composerIsReconnecting('error', true)).toBe(true)
+    expect(composerIsReconnecting('open', true)).toBe(false)
   })
 })
 
