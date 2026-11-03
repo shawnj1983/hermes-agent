@@ -112,6 +112,16 @@ export class JsonRpcGatewayClient {
   /** Set while a post-reconnect replay fetch is in flight (dedup guard). */
   private replayInFlight = false
   /**
+   * In-flight `connect()` promise. A second call while a dial is still
+   * pending used to resolve immediately as success, which after sleep/wake
+   * left the client stuck in `connecting` forever (#39956): the first
+   * handshake's timer/events can vanish, and every later reconnect no-op'd.
+   * Joiners wait on this same promise instead.
+   */
+  private inFlightConnect: Promise<void> | null = null
+  /** Rejects the handshake when close()/invalidate() tears down a connecting socket. */
+  private connectReject: ((error: Error) => void) | null = null
+  /**
    * While a replay fetch is in flight, live seq'd frames for the sessions
    * being replayed are parked here instead of dispatching immediately.
    * Without this hold, a live frame racing the replay response is dispatched
@@ -177,8 +187,12 @@ export class JsonRpcGatewayClient {
       throw invalidUrl()
     }
 
-    if (this.socket?.readyState === WebSocket.OPEN || this.state === 'connecting') {
+    if (this.socket?.readyState === WebSocket.OPEN) {
       return
+    }
+
+    if (this.inFlightConnect) {
+      return this.inFlightConnect
     }
 
     this.setState('connecting')
@@ -211,7 +225,7 @@ export class JsonRpcGatewayClient {
       this.rejectAllPending(new Error(this.options.closedErrorMessage))
     })
 
-    await new Promise<void>((resolve, reject) => {
+    const pending = new Promise<void>((resolve, reject) => {
       let settled = false
       let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -224,6 +238,17 @@ export class JsonRpcGatewayClient {
         socket.removeEventListener('error', onError)
       }
 
+      this.connectReject = error => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        cleanup()
+        this.connectReject = null
+        reject(error)
+      }
+
       const onOpen = () => {
         if (settled || this.socket !== socket) {
           return
@@ -231,6 +256,7 @@ export class JsonRpcGatewayClient {
 
         settled = true
         cleanup()
+        this.connectReject = null
         this.setState('open')
         resolve()
         // Lossless resume: drain events emitted while we were disconnected.
@@ -246,6 +272,7 @@ export class JsonRpcGatewayClient {
 
         settled = true
         cleanup()
+        this.connectReject = null
         this.setState('error')
         reject(new Error(this.options.connectErrorMessage))
       }
@@ -261,6 +288,7 @@ export class JsonRpcGatewayClient {
 
           settled = true
           cleanup()
+          this.connectReject = null
 
           // Drop the half-open socket so the next connect() starts clean
           // instead of short-circuiting on a zombie 'connecting' state.
@@ -279,6 +307,15 @@ export class JsonRpcGatewayClient {
         }, this.options.connectTimeoutMs)
       }
     })
+
+    const tracked = pending.finally(() => {
+      if (this.inFlightConnect === tracked) {
+        this.inFlightConnect = null
+      }
+    })
+
+    this.inFlightConnect = tracked
+    await tracked
   }
 
   close(): void {
@@ -293,6 +330,7 @@ export class JsonRpcGatewayClient {
     } finally {
       this.socket = null
       this.stopHeartbeat()
+      this.failInFlightConnect(new Error(this.options.connectErrorMessage))
       this.setState('closed')
       this.rejectAllPending(new Error(this.options.closedErrorMessage))
     }
@@ -705,8 +743,18 @@ export class JsonRpcGatewayClient {
       // The generation was already invalidated; the reconnect owner can redial.
     }
 
+    this.failInFlightConnect(error)
     this.setState('closed')
     this.rejectAllPending(error)
+  }
+
+  private failInFlightConnect(error: Error): void {
+    const reject = this.connectReject
+    this.connectReject = null
+    // Clear before reject() so a same-tick close()+connect() (recovery / wake
+    // redial) starts a new handshake instead of joining the one we just killed.
+    this.inFlightConnect = null
+    reject?.(error)
   }
 
   private clearPending(id: GatewayRequestId): void {

@@ -30,6 +30,7 @@ import { AttachmentList } from './attachments'
 import {
   acceptsTriggerCompletion,
   COMPOSER_FADE_BACKGROUND,
+  composerIsReconnecting,
   type QueueEditState,
   slashArgStage
 } from './composer-utils'
@@ -214,7 +215,18 @@ export function ChatBar({
 
   const { t } = useI18n()
   const gatewayState = useStore($gatewayState)
-  const reconnecting = gatewayState === 'closed' || gatewayState === 'error'
+  // Latch the first successful open so a later `connecting` (sleep/wake
+  // redial, no-network) is treated as reconnect — not a cold start that
+  // disables the textbox. See composerIsReconnecting (#39956).
+  const hasOpenedGatewayRef = useRef(false)
+
+  useEffect(() => {
+    if (gatewayState === 'open') {
+      hasOpenedGatewayRef.current = true
+    }
+  }, [gatewayState])
+
+  const reconnecting = composerIsReconnecting(gatewayState, hasOpenedGatewayRef.current)
   const inputDisabled = disabled && !reconnecting
 
   // The draft engine — detached source of truth (DOM + draftRef + edge

@@ -121,8 +121,9 @@ const BOOT_RETRY_BASE_DELAY_MS = 2_000
 // pending, `reconnecting` never clears, so scheduleReconnect()/
 // attemptReconnect() early-return permanently and the backoff loop is
 // latched — the UI stays "reconnecting" until the app is restarted even
-// though the gateway is reachable again. gateway.connect() already has its
-// own connect timeout.
+// though the gateway is reachable again. gateway.connect() has its own
+// 15s handshake timeout, but after sleep that timer can vanish (#39956),
+// so attemptReconnect also bounds the await and closes the socket.
 
 /** Registry identity whose runtimes died with the primary connection. */
 export function primaryRuntimeConnectionId(connection: Pick<HermesConnection, 'connectionId' | 'mode'>): null | string {
@@ -355,7 +356,15 @@ export function useGatewayBoot({
           'Timed out re-minting the gateway WebSocket URL'
         )
 
-        await gateway.connect(wsUrl)
+        // Own bound on top of the client's 15s handshake timeout (#39956):
+        // after sleep those timers can vanish while state stays `connecting`,
+        // which used to latch this loop (and disable the composer) forever.
+        await withTimeout(
+          gateway.connect(wsUrl),
+          RECONNECT_ATTEMPT_TIMEOUT_MS,
+          'Timed out reconnecting to Hermes gateway',
+          () => gateway.close()
+        )
 
         if (cancelled) {
           return
