@@ -9466,7 +9466,14 @@ Examples:
     )
     mcp_add_p.add_argument("name", help="Server name (used as config key)")
     mcp_add_p.add_argument("--url", help="HTTP/SSE endpoint URL")
-    mcp_add_p.add_argument("--command", help="Stdio command (e.g. npx)")
+    # dest must not be "command": the top-level subparsers action uses that
+    # name. A default of None on this flag would overwrite command="mcp"
+    # and hermes mcp add would fall through to interactive chat.
+    mcp_add_p.add_argument(
+        "--command",
+        dest="stdio_command",
+        help="Stdio command (e.g. npx)",
+    )
     mcp_add_p.add_argument(
         "--args", nargs="*", default=[], help="Arguments for stdio command"
     )
