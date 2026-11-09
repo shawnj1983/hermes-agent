@@ -1,7 +1,7 @@
 ---
 name: airtable
 description: Airtable REST API via curl. Records CRUD, filters, upserts.
-version: 1.1.0
+version: 1.1.1
 author: community
 license: MIT
 prerequisites:
@@ -11,11 +11,16 @@ metadata:
   hermes:
     tags: [Airtable, Productivity, Database, API]
     homepage: https://airtable.com/developers/web/api/introduction
+    related_skills: [zapier-mcp-workflows]
 ---
 
 # Airtable — Bases, Tables & Records
 
 Work with Airtable's REST API directly via `curl` using the `terminal` tool. No MCP server, no OAuth flow, no Python SDK — just `curl` and a personal access token.
+
+## Optional Zapier MCP
+
+Curl with `AIRTABLE_API_KEY` below remains how this skill talks to Airtable. This file does not define an Airtable MCP server. Preset `zapier-airtable` (`hermes mcp add zapier-airtable --preset zapier-airtable --auth oauth`) and the record sync — list records that need action, update them, write a status field back — live in `zapier-mcp-workflows` (`skills/devops/zapier-mcp-workflows`).
 
 ## Prerequisites
 
