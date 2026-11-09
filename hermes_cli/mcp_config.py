@@ -9,6 +9,7 @@ configuration in ~/.hermes/config.yaml under the ``mcp_servers`` key.
 """
 
 import asyncio
+import copy
 import logging
 import os
 import re
@@ -30,8 +31,30 @@ logger = logging.getLogger(__name__)
 
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# Official Zapier MCP Streamable HTTP endpoint. Auth is OAuth — never embed
+# tokens or secrets in a preset. All Zapier app presets share this one URL.
+_ZAPIER_MCP_CONNECT_URL = "https://mcp.zapier.com/api/v1/connect"
 
-_MCP_PRESETS: Dict[str, Dict[str, Any]] = {}
+# Non-transport fields a preset may copy onto the saved server entry.
+# Headers, env, and other credential material are intentionally excluded.
+_MCP_PRESET_CONFIG_KEYS = ("auth", "timeout", "connect_timeout", "tools")
+
+
+def _zapier_mcp_preset() -> Dict[str, Any]:
+    """Shared Zapier MCP server entry. Callers get a fresh dict."""
+    return {
+        "url": _ZAPIER_MCP_CONNECT_URL,
+        "auth": "oauth",
+    }
+
+
+# Names are prefixed so they do not collide with a native ``github`` stdio
+# server. Day-to-day git/gh stays on the gh CLI; these attach Zapier's MCP.
+_MCP_PRESETS: Dict[str, Dict[str, Any]] = {
+    "zapier-github": _zapier_mcp_preset(),
+    "zapier-linear": _zapier_mcp_preset(),
+    "zapier-airtable": _zapier_mcp_preset(),
+}
 
 
 # ─── UI Helpers ───────────────────────────────────────────────────────────────
@@ -153,6 +176,15 @@ def _apply_mcp_preset(
     if cmd_args:
         server_config["args"] = cmd_args
 
+    for key in _MCP_PRESET_CONFIG_KEYS:
+        if key not in preset or preset[key] is None:
+            continue
+        value = preset[key]
+        if isinstance(value, (dict, list)):
+            server_config[key] = copy.deepcopy(value)
+        else:
+            server_config[key] = value
+
     return url, command, cmd_args, True
 
 
@@ -221,7 +253,13 @@ def cmd_mcp_add(args):
     """Add a new MCP server with discovery-first tool selection."""
     name = args.name
     url = getattr(args, "url", None)
-    command = getattr(args, "command", None)
+    # CLI stores the stdio executable on stdio_command so it does not
+    # clobber the top-level subparser dest ``command``. Unit tests build
+    # a Namespace with ``command`` directly.
+    if hasattr(args, "stdio_command"):
+        command = args.stdio_command
+    else:
+        command = getattr(args, "command", None)
     cmd_args = getattr(args, "args", None) or []
     auth_type = getattr(args, "auth", None)
     preset_name = getattr(args, "preset", None)
@@ -230,7 +268,7 @@ def cmd_mcp_add(args):
     server_config: Dict[str, Any] = {}
     try:
         explicit_env = _parse_env_assignments(raw_env)
-        url, command, cmd_args, _preset_applied = _apply_mcp_preset(
+        url, command, cmd_args, preset_applied = _apply_mcp_preset(
             name,
             preset_name=preset_name,
             url=url,
@@ -241,6 +279,13 @@ def cmd_mcp_add(args):
     except ValueError as exc:
         _error(str(exc))
         return
+
+    # Preset auth (for example Zapier OAuth) applies when --auth was omitted
+    # so an HTTP preset does not fall through to the bearer-token prompt.
+    if not auth_type and preset_applied:
+        preset_auth = server_config.get("auth")
+        if isinstance(preset_auth, str) and preset_auth.strip():
+            auth_type = preset_auth.strip().lower()
 
     if url and explicit_env:
         _error("--env is only supported for stdio MCP servers (--command or stdio presets)")
@@ -294,8 +339,9 @@ def cmd_mcp_add(args):
         if not oauth_ok:
             _info("This server may not support OAuth.")
             if _confirm("Continue without authentication?", default=True):
-                # Don't store auth: oauth — server doesn't support it
-                pass
+                # Don't store auth: oauth — server doesn't support it.
+                # Drop a value copied from a preset as well.
+                server_config.pop("auth", None)
             else:
                 _info("Cancelled.")
                 return

@@ -743,6 +743,21 @@ platform_toolsets:
 #     args: ["-y", "@modelcontextprotocol/server-github"]
 #     env:
 #       GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_..."
+#   # Zapier MCP presets (Streamable HTTP + OAuth). All three use
+#   # https://mcp.zapier.com/api/v1/connect — no tokens in this file.
+#   # Prefixed names do not collide with the native github stdio server
+#   # above. Day-to-day git/gh stays on the gh CLI. Commented so a default
+#   # install does not try to connect.
+#   #   hermes mcp add zapier-github --preset zapier-github
+#   zapier-github:
+#     url: https://mcp.zapier.com/api/v1/connect
+#     auth: oauth
+#   zapier-linear:
+#     url: https://mcp.zapier.com/api/v1/connect
+#     auth: oauth
+#   zapier-airtable:
+#     url: https://mcp.zapier.com/api/v1/connect
+#     auth: oauth
 #
 # Sampling (server-initiated LLM requests) — enabled by default.
 # Per-server config under the 'sampling' key:

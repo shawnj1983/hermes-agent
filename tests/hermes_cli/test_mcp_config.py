@@ -410,6 +410,202 @@ class TestMcpAdd:
         out = capsys.readouterr().out
         assert "Unknown MCP preset" in out
 
+    def test_add_uses_stdio_command_not_subcommand_dest(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """The stdio executable is ``--command``, not the ``mcp`` subcommand."""
+        seen = {}
+
+        def mock_probe(name, config, **kw):
+            seen["config"] = config
+            return [("search", "Search repos")]
+
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server", mock_probe
+        )
+        monkeypatch.setattr("builtins.input", lambda _: "")
+
+        from hermes_cli.mcp_config import cmd_mcp_add
+        from hermes_cli.config import load_config
+
+        cmd_mcp_add(_make_args(
+            name="github",
+            command="mcp",
+            stdio_command="npx",
+            args=["-y", "@modelcontextprotocol/server-github"],
+        ))
+        out = capsys.readouterr().out
+        assert "Saved" in out
+        assert seen["config"]["command"] == "npx"
+        assert seen["config"]["args"] == ["-y", "@modelcontextprotocol/server-github"]
+        srv = load_config()["mcp_servers"]["github"]
+        assert srv["command"] == "npx"
+        assert "url" not in srv
+
+
+_ZAPIER_MCP_CONNECT_URL = "https://mcp.zapier.com/api/v1/connect"
+_ZAPIER_PRESET_NAMES = ("zapier-github", "zapier-linear", "zapier-airtable")
+
+
+class TestZapierMcpPresets:
+    def test_zapier_presets_share_connect_url_and_oauth(self):
+        """GitHub, Linear, and Airtable presets point at Zapier MCP OAuth."""
+        from hermes_cli.mcp_config import _MCP_PRESETS, _apply_mcp_preset
+
+        for name in _ZAPIER_PRESET_NAMES:
+            preset = _MCP_PRESETS[name]
+            assert preset["url"] == _ZAPIER_MCP_CONNECT_URL
+            assert preset["auth"] == "oauth"
+            assert "headers" not in preset
+            assert "env" not in preset
+
+        server_config: Dict[str, Any] = {}
+        url, command, cmd_args, applied = _apply_mcp_preset(
+            "zapier-linear",
+            preset_name="zapier-linear",
+            url=None,
+            command=None,
+            cmd_args=[],
+            server_config=server_config,
+        )
+        assert applied is True
+        assert command is None
+        assert cmd_args == []
+        assert url == _ZAPIER_MCP_CONNECT_URL
+        assert server_config["url"] == _ZAPIER_MCP_CONNECT_URL
+        assert server_config["auth"] == "oauth"
+
+    def test_apply_preset_copies_allowlisted_keys_only(self, monkeypatch):
+        """auth/timeout/connect_timeout/tools copy; headers and env do not."""
+        tools = {"include": ["alpha"]}
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._MCP_PRESETS",
+            {
+                "demo": {
+                    "url": "https://example.test/mcp",
+                    "auth": "oauth",
+                    "timeout": 12,
+                    "connect_timeout": 3,
+                    "tools": tools,
+                    "headers": {"Authorization": "Bearer secret"},
+                    "env": {"TOKEN": "secret"},
+                }
+            },
+        )
+        from hermes_cli.mcp_config import _MCP_PRESETS, _apply_mcp_preset
+
+        server_config: Dict[str, Any] = {}
+        _apply_mcp_preset(
+            "demo",
+            preset_name="demo",
+            url=None,
+            command=None,
+            cmd_args=[],
+            server_config=server_config,
+        )
+        assert server_config["url"] == "https://example.test/mcp"
+        assert server_config["auth"] == "oauth"
+        assert server_config["timeout"] == 12
+        assert server_config["connect_timeout"] == 3
+        assert server_config["tools"] == {"include": ["alpha"]}
+        assert "headers" not in server_config
+        assert "env" not in server_config
+
+        server_config["tools"]["include"].append("beta")
+        assert _MCP_PRESETS["demo"]["tools"]["include"] == ["alpha"]
+
+    def test_add_honors_preset_oauth_when_auth_omitted(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Omitting --auth must not prompt for a bearer token."""
+        seen: Dict[str, Any] = {}
+
+        class _Mgr:
+            def get_or_build_provider(self, name, url, oauth_config):
+                seen["provider"] = (name, url, oauth_config)
+                return object()
+
+        monkeypatch.setattr(
+            "tools.mcp_oauth_manager.get_manager", lambda: _Mgr()
+        )
+
+        def mock_probe(name, config, **kw):
+            seen["probe_config"] = dict(config)
+            return [("list_issues", "List issues")]
+
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server", mock_probe
+        )
+        prompts: List[str] = []
+
+        def fake_input(prompt=""):
+            prompts.append(str(prompt))
+            return ""
+
+        monkeypatch.setattr("builtins.input", fake_input)
+
+        from hermes_cli.mcp_config import cmd_mcp_add
+        from hermes_cli.config import load_config
+
+        cmd_mcp_add(_make_args(name="zapier-linear", preset="zapier-linear"))
+        out = capsys.readouterr().out
+        assert "Saved" in out
+
+        prompt_text = "\n".join(prompts).lower()
+        assert "api key" not in prompt_text
+        assert "bearer" not in prompt_text
+        assert "require authentication" not in prompt_text
+
+        assert seen["provider"][0] == "zapier-linear"
+        assert seen["provider"][1] == _ZAPIER_MCP_CONNECT_URL
+        assert seen["probe_config"]["url"] == _ZAPIER_MCP_CONNECT_URL
+        assert seen["probe_config"]["auth"] == "oauth"
+
+        srv = load_config()["mcp_servers"]["zapier-linear"]
+        assert srv["url"] == _ZAPIER_MCP_CONNECT_URL
+        assert srv["auth"] == "oauth"
+
+    def test_cli_mcp_add_preset_does_not_fall_through_to_chat(self, monkeypatch):
+        """``--command`` must not clobber the top-level subcommand dest."""
+        import sys
+        import hermes_cli.main as main_mod
+        import hermes_cli.mcp_config as mcp_config
+
+        captured: Dict[str, Any] = {}
+
+        def fake_add(args):
+            captured["add"] = args
+
+        def fake_chat(args):
+            captured["chat"] = args
+
+        monkeypatch.setattr(mcp_config, "cmd_mcp_add", fake_add)
+        monkeypatch.setattr(main_mod, "cmd_chat", fake_chat)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "hermes",
+                "mcp",
+                "add",
+                "zapier-linear",
+                "--preset",
+                "zapier-linear",
+                "--auth",
+                "oauth",
+            ],
+        )
+
+        main_mod.main()
+
+        assert "chat" not in captured
+        args = captured["add"]
+        assert args.command == "mcp"
+        assert args.stdio_command is None
+        assert args.name == "zapier-linear"
+        assert args.preset == "zapier-linear"
+        assert args.auth == "oauth"
+
 
 # ---------------------------------------------------------------------------
 # Tests: cmd_mcp_test
