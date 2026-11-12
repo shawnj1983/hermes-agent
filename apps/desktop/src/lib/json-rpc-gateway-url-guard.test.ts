@@ -64,6 +64,108 @@ describe('JsonRpcGatewayClient connect() URL guard', () => {
   })
 })
 
+describe('JsonRpcGatewayClient connect() join (#39956 sleep/wake stall)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('WebSocket', { OPEN: 1, CONNECTING: 0, CLOSED: 3 })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('does not treat a second connect() as success while the first handshake is still in flight', async () => {
+    const sockets: Array<{ open: () => void }> = []
+
+    class HungSocket {
+      static OPEN = 1
+      readyState = 0
+      private openHandler: (() => void) | null = null
+
+      addEventListener = (type: string, handler: () => void) => {
+        if (type === 'open') {
+          this.openHandler = handler
+        }
+      }
+
+      removeEventListener = vi.fn()
+      close = vi.fn()
+      send = vi.fn()
+
+      open() {
+        this.readyState = HungSocket.OPEN
+        this.openHandler?.()
+      }
+    }
+
+    const client = new JsonRpcGatewayClient({
+      connectTimeoutMs: 0,
+      socketFactory: () => {
+        const socket = new HungSocket()
+        sockets.push(socket)
+
+        return socket as unknown as WebSocket
+      }
+    })
+
+    const first = client.connect('ws://gateway.test/a')
+    const second = client.connect('ws://gateway.test/b')
+
+    expect(sockets).toHaveLength(1)
+    expect(client.connectionState).toBe('connecting')
+
+    let firstSettled = false
+    let secondSettled = false
+    void first.then(() => {
+      firstSettled = true
+    })
+    void second.then(() => {
+      secondSettled = true
+    })
+    await Promise.resolve()
+    expect(firstSettled).toBe(false)
+    expect(secondSettled).toBe(false)
+
+    sockets[0]?.open()
+    await Promise.all([first, second])
+    expect(client.connectionState).toBe('open')
+  })
+
+  it('lets close() fail a hung handshake so the next connect() can dial again', async () => {
+    class HungSocket {
+      static OPEN = 1
+      readyState = 0
+      addEventListener = vi.fn()
+      removeEventListener = vi.fn()
+      close = vi.fn()
+      send = vi.fn()
+    }
+
+    let sockets = 0
+
+    const client = new JsonRpcGatewayClient({
+      connectTimeoutMs: 0,
+      socketFactory: () => {
+        sockets += 1
+
+        return new HungSocket() as unknown as WebSocket
+      }
+    })
+
+    const hung = client.connect('ws://gateway.test/a')
+    expect(client.connectionState).toBe('connecting')
+    client.close()
+    await expect(hung).rejects.toThrow('WebSocket connection failed')
+    expect(client.connectionState).toBe('closed')
+
+    const retry = client.connect('ws://gateway.test/b')
+    expect(sockets).toBe(2)
+    // Leave the retry hanging; the point is a new dial started.
+    expect(client.connectionState).toBe('connecting')
+    client.close()
+    await expect(retry).rejects.toThrow('WebSocket connection failed')
+  })
+})
+
 describe('JsonRpcGatewayClient structured errors', () => {
   it('rejects with JsonRpcGatewayError including code and data', async () => {
     class RespondingSocket {

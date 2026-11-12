@@ -54,6 +54,19 @@ export const DRAFT_PERSIST_DEBOUNCE_MS = 400
 
 export const pickPlaceholder = (pool: readonly string[]) => pool[Math.floor(Math.random() * pool.length)]
 
+export type ComposerGatewayState = 'closed' | 'connecting' | 'error' | 'idle' | 'open'
+
+/**
+ * After the gateway has opened once, any later non-open transport is a
+ * reconnect — including a sleep/wake stall that sits in `connecting`.
+ * Treating only `closed`/`error` as reconnect left the composer
+ * `contentEditable=false` for the whole no-network redial (#39956).
+ * Cold start (`idle` / first `connecting`) stays "Starting Hermes...".
+ */
+export function composerIsReconnecting(gatewayState: ComposerGatewayState, hasOpenedOnce: boolean): boolean {
+  return hasOpenedOnce && gatewayState !== 'open'
+}
+
 /** Completion items can carry an `action` (set in use-slash-completions) that
  *  runs a side effect on pick instead of inserting a chip — e.g. the session
  *  picker's "Browse all…" entry opens the overlay. Table-driven so new action

@@ -100,7 +100,12 @@ export function useGatewayRequest() {
           'Timed out re-minting the gateway WebSocket URL'
         )
 
-        await existing.connect(wsUrl)
+        await withTimeout(
+          existing.connect(wsUrl),
+          RECONNECT_ATTEMPT_TIMEOUT_MS,
+          'Timed out reconnecting to Hermes gateway',
+          () => existing.close()
+        )
 
         return existing
       } catch (error) {
