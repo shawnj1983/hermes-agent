@@ -1,6 +1,6 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
-import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef } from 'react'
+import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useHudComposerDrag } from '@/app/hud/composer-drag'
 import { composerFill, composerFloatingStrip, composerSurfaceGlass } from '@/components/chat/composer-dock'
@@ -217,16 +217,16 @@ export function ChatBar({
   const gatewayState = useStore($gatewayState)
   // Latch the first successful open so a later `connecting` (sleep/wake
   // redial, no-network) is treated as reconnect — not a cold start that
-  // disables the textbox. See composerIsReconnecting (#39956).
-  const hasOpenedGatewayRef = useRef(false)
+  // disables the textbox. See composerIsReconnecting (#39956). Updated in
+  // render, not mirrored into a ref from an effect, so the latch does not
+  // lag the atom by a render.
+  const [hasOpenedGateway, setHasOpenedGateway] = useState(false)
 
-  useEffect(() => {
-    if (gatewayState === 'open') {
-      hasOpenedGatewayRef.current = true
-    }
-  }, [gatewayState])
+  if (gatewayState === 'open' && !hasOpenedGateway) {
+    setHasOpenedGateway(true)
+  }
 
-  const reconnecting = composerIsReconnecting(gatewayState, hasOpenedGatewayRef.current)
+  const reconnecting = composerIsReconnecting(gatewayState, hasOpenedGateway)
   const inputDisabled = disabled && !reconnecting
 
   // The draft engine — detached source of truth (DOM + draftRef + edge

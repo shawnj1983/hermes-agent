@@ -141,6 +141,7 @@ describe('JsonRpcGatewayClient connect() join (#39956 sleep/wake stall)', () => 
     }
 
     let sockets = 0
+
     const client = new JsonRpcGatewayClient({
       connectTimeoutMs: 0,
       socketFactory: () => {
