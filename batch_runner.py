@@ -1,4 +1,4 @@
-Yeah yeah you can be careful oh one more thing you didn't tell me how I'm gonna send my email to you#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Batch Agent Runner
 
