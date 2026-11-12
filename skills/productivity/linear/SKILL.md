@@ -1,7 +1,7 @@
 ---
 name: linear
 description: "Linear: manage issues, projects, teams via GraphQL + curl."
-version: 1.0.0
+version: 1.0.1
 author: Hermes Agent
 license: MIT
 prerequisites:
@@ -10,11 +10,16 @@ prerequisites:
 metadata:
   hermes:
     tags: [Linear, Project Management, Issues, GraphQL, API, Productivity]
+    related_skills: [zapier-mcp-workflows, kanban-worker]
 ---
 
 # Linear — Issue & Project Management
 
 Manage Linear issues, projects, and teams directly via the GraphQL API using `curl`. No MCP server, no OAuth flow, no extra dependencies.
+
+## Optional Zapier MCP
+
+Curl with `LINEAR_API_KEY` below remains how this skill talks to Linear. This file does not define a Linear MCP server. Preset `zapier-linear` (`hermes mcp add zapier-linear --preset zapier-linear --auth oauth`) and the workflow that reads triage issues, opens a Hermes kanban card, and comments the PR or commit link back on the issue live in `zapier-mcp-workflows` (`skills/devops/zapier-mcp-workflows`).
 
 ## Setup
 

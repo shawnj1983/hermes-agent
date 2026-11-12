@@ -1,10 +1,11 @@
 ---
 name: webhook-subscriptions
 description: "Webhook subscriptions: event-driven agent runs."
-version: 1.1.0
+version: 1.1.1
 metadata:
   hermes:
     tags: [webhook, events, automation, integrations, notifications, push]
+    related_skills: [zapier-mcp-workflows, github-code-review]
 ---
 
 # Webhook Subscriptions
@@ -128,6 +129,10 @@ hermes webhook subscribe github-prs \
   --skills "github-code-review" \
   --deliver github_comment
 ```
+
+### Zapier relay (gateway not public)
+
+When the gateway is not public, Zapier can POST GitHub `issues` and `pull_request` events to the webhook URL these subscribe commands print. Preset `zapier-github`, the relay headers, and the rule that day-to-day repo commands stay on `gh` and the native GitHub MCP example are in `zapier-mcp-workflows` (`skills/devops/zapier-mcp-workflows`). The subscribe commands above stay the source of truth.
 
 ### Stripe: payment events
 ```bash
